@@ -1,5 +1,3 @@
-'use client';
-
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -8,33 +6,26 @@ export default function MarkWatchedButton({ episodeId }: { episodeId: string }) 
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
-  function handleClick() {
-    setDone(true);
-    startTransition(async () => {
-      await fetch('/api/episodes/toggle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ episodeId, watched: true }),
-      });
-      router.refresh();
-    });
-  }
-
-  if (done) {
-    return (
-      <span className="text-xs px-3 py-1.5 rounded-tape font-mono text-tracking flex-shrink-0">
-        Vu ✓
-      </span>
-    );
-  }
+  if (done) return <span className="text-tracking font-mono text-xs flex-shrink-0">✓</span>;
 
   return (
     <button
-      onClick={handleClick}
+      onClick={() => {
+        setDone(true);
+        startTransition(async () => {
+          await fetch('/api/episodes/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ episodeId, watched: true }),
+          });
+          router.refresh();
+        });
+      }}
       disabled={isPending}
-      className="text-xs px-3 py-1.5 rounded-tape border border-rec text-rec hover:bg-rec hover:text-ink transition-colors flex-shrink-0 font-mono whitespace-nowrap"
+      className="flex-shrink-0 w-9 h-9 rounded-tape bg-rec text-ink font-bold text-base hover:opacity-90 disabled:opacity-50 transition-opacity"
+      title="Marquer vu"
     >
-      +1 épisode
+      ✓
     </button>
   );
 }
