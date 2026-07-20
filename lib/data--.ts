@@ -184,7 +184,195 @@ export async function getLibrary(userId: string): Promise<LibraryItem[]> {
     });
 }
 
-export interface ProfileStats {
+export interface StatusMismatch {
+  mediaItemId: string;
+  title: string;
+  currentStatus: WatchStatus;
+  suggestedStatus: WatchStatus;
+  episodesWatched: number;
+  episodesTotal: number;
+}
+
+/**
+ * Détecte les séries dont le statut ne colle pas au nombre d'épisodes
+ * réellement vus (ex: marquée "Vu" alors que 0 épisode coché — typiquement
+ * un reliquat de l'import Sofa Time). Ne touche jamais "dropped" — c'est
+ * un choix explicite de l'utilisateur, pas une déduction.
+ */
+export async function getStatusMismatches(userId: string): Promise<StatusMismatch[]> {
+  const items = await getLibrary(userId);
+  const mismatches: StatusMismatch[] = [];
+
+  for (const item of items) {
+    if (item.type !== 'tv' || item.status === 'dropped') continue;
+    const total = item.episodes_total ?? 0;
+    if (total === 0) continue;
+    const watched = item.episodes_watched;
+
+    let suggested: WatchStatus | null = null;
+    if (item.status === 'watched' && watched === 0) suggested = 'watchlist';
+    else if (item.status === 'watched' && watched < total) suggested = 'watching';
+    else if (item.status === 'watchlist' && watched > 0 && watched < total) suggested = 'watching';
+    else if (item.status === 'watchlist' && watched >= total) suggested = 'watched';
+    else if (item.status === 'watching' && watched >= total) suggested = 'watched';
+
+    if (suggested && suggested !== item.status) {
+      mismatches.push({
+        mediaItemId: item.id,
+        title: item.title,
+        currentStatus: item.status,
+        suggestedStatus: suggested,
+        episodesWatched: watched,
+        episodesTotal: total,
+      });
+    }
+  }
+
+  return mismatches;
+}
+
+export interface HistoryEntry {
+  key: string;
+  mediaItemId: string;
+  title: string;
+  posterUrl: string | null;
+  type: 'tv' | 'movie';
+  watchedAt: string;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+  episodeTitle: string | null;
+}
+
+/** Historique chronologique (le plus récent en premier) : épisodes + films vus. */
+export async function getHistory(userId: string, limit = 100): Promise<HistoryEntry[]> {
+  const supabase = createClient();
+
+  const { data: episodeRows } = await supabase
+    .from('user_episode_progress')
+    .select(
+      `watched_at,
+       episodes (
+         id, episode_number, title,
+         seasons ( season_number, media_items ( id, title, poster_url ) )
+       )`
+    )
+    .eq('user_id', userId)
+    .order('watched_at', { ascending: false })
+    .limit(limit);
+
+  const episodeEntries: HistoryEntry[] = (episodeRows ?? [])
+    .map((row: any) => {
+      const ep = row.episodes;
+      const season = ep?.seasons;
+      const media = season?.media_items;
+      if (!media) return null;
+      return {
+        key: `ep-${ep.id}`,
+        mediaItemId: media.id,
+        title: media.title,
+        posterUrl: media.poster_url,
+        type: 'tv' as const,
+        watchedAt: row.watched_at,
+        seasonNumber: season.season_number,
+        episodeNumber: ep.episode_number,
+        episodeTitle: ep.title,
+      };
+    })
+    .filter((e): e is HistoryEntry => e !== null);
+
+  const { data: movieRows } = await supabase
+    .from('user_media_status')
+    .select('added_at, media_items ( id, title, poster_url, type )')
+    .eq('user_id', userId)
+    .eq('status', 'watched');
+
+  const movieEntries: HistoryEntry[] = (movieRows ?? [])
+    .map((row: any) => row.media_items && row.media_items.type === 'movie'
+      ? {
+          key: `movie-${row.media_items.id}`,
+          mediaItemId: row.media_items.id,
+          title: row.media_items.title,
+          posterUrl: row.media_items.poster_url,
+          type: 'movie' as const,
+          watchedAt: row.added_at,
+          seasonNumber: null,
+          episodeNumber: null,
+          episodeTitle: null,
+        }
+      : null)
+    .filter((e): e is HistoryEntry => e !== null);
+
+  return [...episodeEntries, ...movieEntries]
+    .sort((a, b) => b.watchedAt.localeCompare(a.watchedAt))
+    .slice(0, limit);
+}
+
+export interface CalendarEpisode {
+  mediaItemId: string;
+  title: string;
+  posterUrl: string | null;
+  seasonNumber: number;
+  episodeNumber: number;
+  episodeTitle: string | null;
+  airDate: string;
+  watched: boolean;
+}
+
+/** Épisodes (passés et futurs) du mois donné, pour toutes les séries en bibliothèque. */
+export async function getCalendarMonth(
+  userId: string,
+  year: number,
+  month: number // 1-12
+): Promise<CalendarEpisode[]> {
+  const supabase = createClient();
+
+  const from = `${year}-${String(month).padStart(2, '0')}-01`;
+  const lastDay = new Date(year, month, 0).getDate();
+  const to = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+  const { data: statusRows } = await supabase
+    .from('user_media_status')
+    .select(
+      `media_items (
+         id, title, poster_url, type,
+         seasons ( season_number, episodes ( id, episode_number, title, air_date ) )
+       )`
+    )
+    .eq('user_id', userId)
+    .neq('status', 'dropped');
+
+  const shows = (statusRows ?? [])
+    .map((r: any) => r.media_items)
+    .filter((m: any) => m && m.type === 'tv' && m.seasons?.length > 0);
+
+  const { data: progressRows } = await supabase
+    .from('user_episode_progress')
+    .select('episode_id')
+    .eq('user_id', userId);
+  const watchedIds = new Set((progressRows ?? []).map((r) => r.episode_id));
+
+  const result: CalendarEpisode[] = [];
+  for (const show of shows) {
+    for (const season of show.seasons as any[]) {
+      for (const ep of season.episodes ?? []) {
+        if (!ep.air_date || ep.air_date < from || ep.air_date > to) continue;
+        result.push({
+          mediaItemId: show.id,
+          title: show.title,
+          posterUrl: show.poster_url,
+          seasonNumber: season.season_number,
+          episodeNumber: ep.episode_number,
+          episodeTitle: ep.title,
+          airDate: ep.air_date,
+          watched: watchedIds.has(ep.id),
+        });
+      }
+    }
+  }
+
+  result.sort((a, b) => a.airDate.localeCompare(b.airDate));
+  return result;
+}
   episodesWatched: number;
   moviesWatched: number;
   showsWatching: number;
