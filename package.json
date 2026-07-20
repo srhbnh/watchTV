@@ -1,0 +1,14 @@
+{
+  "name": "watchnext-import",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Import de l'export Sofa Time (canonical.json) dans Supabase pour WatchNext, avec matching TVmaze",
+  "scripts": {
+    "import": "node import.mjs",
+    "import:dry-run": "node import.mjs --dry-run"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.5"
+  }
+}
