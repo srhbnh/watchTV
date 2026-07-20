@@ -15,11 +15,27 @@ export async function POST(request: Request) {
   const show = await getShowWithNextEpisode(tvmazeId);
   const episodes = await getShowEpisodes(tvmazeId);
 
-  const { data: existing } = await supabase
-    .from('media_items')
-    .select('id')
-    .eq('tvmaze_id', tvmazeId)
-    .maybeSingle();
+  // On cherche d'abord par tvmaze_id, puis par imdb_id : certaines fiches
+  // ont été créées par l'import Sofa Time sans tvmaze_id (non matchées à
+  // l'époque) — les retrouver par imdb évite de créer un doublon quand on
+  // les rajoute ici manuellement.
+  let existing: { id: string } | null = null;
+  {
+    const { data } = await supabase
+      .from('media_items')
+      .select('id')
+      .eq('tvmaze_id', tvmazeId)
+      .maybeSingle();
+    existing = data;
+  }
+  if (!existing && show.externals?.imdb) {
+    const { data } = await supabase
+      .from('media_items')
+      .select('id')
+      .eq('imdb_id', show.externals.imdb)
+      .maybeSingle();
+    existing = data;
+  }
 
   let mediaItemId: string;
 
@@ -85,15 +101,27 @@ export async function POST(request: Request) {
     }
   }
 
-  await supabase.from('user_media_status').upsert(
-    {
-      user_id: user.id,
-      media_item_id: mediaItemId,
-      status: 'watchlist',
-      added_at: new Date().toISOString(),
-    },
-    { onConflict: 'user_id,media_item_id' }
-  );
+  // On ne force "watchlist" que s'il n'y a pas déjà un statut pour ce média
+  // (ex. importé comme "watched" depuis Sofa Time sans avoir pu être lié à
+  // TVmaze à l'époque) — sinon on écraserait un historique déjà correct.
+  const { data: existingStatus } = await supabase
+    .from('user_media_status')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('media_item_id', mediaItemId)
+    .maybeSingle();
+
+  if (!existingStatus) {
+    await supabase.from('user_media_status').upsert(
+      {
+        user_id: user.id,
+        media_item_id: mediaItemId,
+        status: 'watchlist',
+        added_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id,media_item_id' }
+    );
+  }
 
   return NextResponse.json({ ok: true, mediaItemId });
 }
