@@ -20,8 +20,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </Link>
           <div className="flex md:flex-col gap-1 text-sm">
             <NavLink href="/library">Bibliothèque</NavLink>
-            <NavLink href="/upcoming">À venir</NavLink>
+            <NavLink href="/upcoming">À suivre</NavLink>
             <NavLink href="/search">Ajouter</NavLink>
+            <NavLink href="/profile">Profil</NavLink>
           </div>
         </div>
         <div className="hidden md:block">
