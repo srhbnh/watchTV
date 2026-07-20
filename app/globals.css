@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  background-color: #12100e;
+  color: #ede7dc;
+}
+
+* {
+  border-color: #2a2521;
+}
+
+/* Focus clavier visible partout, jamais supprimé */
+:focus-visible {
+  outline: 2px solid #e4572e;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Compteur façon bande magnétique, chiffres tabulaires */
+.tape-counter {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+}
