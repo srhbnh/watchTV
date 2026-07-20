@@ -36,6 +36,16 @@ export default async function ShowDetailPage({ params }: { params: { id: string 
     (a: any, b: any) => a.season_number - b.season_number
   );
 
+  const totalEpisodes = seasons.reduce(
+    (sum: number, s: any) => sum + (s.episodes?.length ?? 0),
+    0
+  );
+  const totalWatched = seasons.reduce(
+    (sum: number, s: any) =>
+      sum + (s.episodes ?? []).filter((e: any) => watchedEpisodeIds.has(e.id)).length,
+    0
+  );
+
   return (
     <div>
       <div className="mb-6">
@@ -47,6 +57,12 @@ export default async function ShowDetailPage({ params }: { params: { id: string 
         <h1 className="font-display text-3xl mt-1">{media.title}</h1>
         {media.genres?.length > 0 && (
           <p className="text-muted text-sm mt-1">{media.genres.join(' · ')}</p>
+        )}
+        {media.type === 'tv' && seasons.length > 0 && (
+          <p className="font-mono text-xs text-muted tape-counter mt-2">
+            {totalWatched}/{totalEpisodes} épisodes vus au total · {seasons.length} saison
+            {seasons.length > 1 ? 's' : ''}
+          </p>
         )}
       </div>
 
