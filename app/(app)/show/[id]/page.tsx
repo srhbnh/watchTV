@@ -1,7 +1,14 @@
 import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { syncShowEpisodes } from '@/lib/sync';
 import StatusSelector from './status-selector';
 import EpisodeChecklist from './episode-checklist';
+
+const STATUS_LABEL: Record<string, string> = {
+  Running: 'En diffusion',
+  Ended: 'Terminée',
+  'To Be Determined': 'En pause',
+};
 
 export default async function ShowDetailPage({ params }: { params: { id: string } }) {
   const supabase = createClient();
@@ -10,9 +17,33 @@ export default async function ShowDetailPage({ params }: { params: { id: string 
   } = await supabase.auth.getUser();
   if (!user) return null;
 
+  // On resynchronise à chaque visite de la fiche si ça fait plus d'une
+  // heure : c'est le moment où l'utilisateur regarde vraiment cette série,
+  // donc le meilleur endroit pour rattraper un épisode fraîchement sorti.
+  const { data: mediaHead } = await supabase
+    .from('media_items')
+    .select('id, tvmaze_id, tv_status, last_synced_at')
+    .eq('id', params.id)
+    .maybeSingle();
+
+  if (mediaHead?.tvmaze_id) {
+    const staleMs = 60 * 60 * 1000;
+    const isStale =
+      !mediaHead.last_synced_at || Date.now() - new Date(mediaHead.last_synced_at).getTime() > staleMs;
+    if (isStale) {
+      try {
+        await syncShowEpisodes(mediaHead.id, mediaHead.tvmaze_id);
+      } catch {
+        // pas bloquant : on affiche quand même l'état connu en base
+      }
+    }
+  }
+
   const { data: media } = await supabase
     .from('media_items')
-    .select('*, seasons ( id, season_number, episodes ( id, episode_number, title, air_date ) )')
+    .select(
+      '*, seasons ( id, season_number, episodes ( id, episode_number, title, air_date, runtime_minutes ) )'
+    )
     .eq('id', params.id)
     .maybeSingle();
 
@@ -49,11 +80,18 @@ export default async function ShowDetailPage({ params }: { params: { id: string 
   return (
     <div>
       <div className="mb-6">
-        {media.category && (
-          <span className="font-mono text-[11px] uppercase tracking-wide text-muted">
-            {media.category === 'anime' ? 'Anime' : 'Série'}
-          </span>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {media.category && (
+            <span className="font-mono text-[11px] uppercase tracking-wide text-muted">
+              {media.category === 'anime' ? 'Anime' : 'Série'}
+            </span>
+          )}
+          {media.tv_status && (
+            <span className="font-mono text-[11px] uppercase tracking-wide text-tracking">
+              · {STATUS_LABEL[media.tv_status] ?? media.tv_status}
+            </span>
+          )}
+        </div>
         <h1 className="font-display text-3xl mt-1">{media.title}</h1>
         {media.genres?.length > 0 && (
           <p className="text-muted text-sm mt-1">{media.genres.join(' · ')}</p>
@@ -62,6 +100,7 @@ export default async function ShowDetailPage({ params }: { params: { id: string 
           <p className="font-mono text-xs text-muted tape-counter mt-2">
             {totalWatched}/{totalEpisodes} épisodes vus au total · {seasons.length} saison
             {seasons.length > 1 ? 's' : ''}
+            {media.runtime_minutes ? ` · ~${media.runtime_minutes} min/ép.` : ''}
           </p>
         )}
       </div>

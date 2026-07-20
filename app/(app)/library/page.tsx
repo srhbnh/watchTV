@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { getLibrary } from '@/lib/data';
 import type { WatchStatus } from '@/lib/types';
+import ResyncAllButton from './resync-all-button';
 
 const TABS: { key: WatchStatus; label: string }[] = [
   { key: 'watched', label: 'Vu' },
@@ -27,7 +28,12 @@ export default async function LibraryPage({
 
   return (
     <div>
-      <h1 className="font-display text-3xl mb-6">Bibliothèque</h1>
+      <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
+        <h1 className="font-display text-3xl">Bibliothèque</h1>
+        <ResyncAllButton
+          mediaItemIds={items.filter((i) => i.type === 'tv' && i.tvmaze_id).map((i) => i.id)}
+        />
+      </div>
 
       <div className="flex gap-1 border-b border-ribbon mb-8 overflow-x-auto">
         {TABS.map((tab) => {

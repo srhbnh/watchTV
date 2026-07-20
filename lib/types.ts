@@ -14,6 +14,8 @@ export interface MediaItem {
   runtime_minutes: number | null;
   release_date: string | null;
   poster_url: string | null;
+  tv_status: string | null;
+  last_synced_at: string | null;
 }
 
 export interface Season {
@@ -29,6 +31,7 @@ export interface Episode {
   title: string | null;
   air_date: string | null;
   tvmaze_episode_id: number | null;
+  runtime_minutes: number | null;
 }
 
 export interface UserMediaStatus {

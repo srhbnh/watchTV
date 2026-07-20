@@ -46,9 +46,11 @@ export async function POST(request: Request) {
     type: 'tv' as const,
     category: category ?? null,
     genres: show.genres ?? [],
-    runtime_minutes: show.runtime,
+    runtime_minutes: show.runtime ?? show.averageRuntime ?? null,
     release_date: show.premiered,
     poster_url: show.image?.original ?? null,
+    tv_status: show.status ?? null,
+    last_synced_at: new Date().toISOString(),
   };
 
   if (existing) {
@@ -95,6 +97,7 @@ export async function POST(request: Request) {
           title: ep.name,
           air_date: ep.airdate,
           tvmaze_episode_id: ep.id,
+          runtime_minutes: ep.runtime ?? show.runtime ?? show.averageRuntime ?? null,
         },
         { onConflict: 'season_id,episode_number' }
       );

@@ -5,6 +5,8 @@ export interface TvmazeShow {
   name: string;
   genres: string[];
   runtime: number | null;
+  averageRuntime: number | null;
+  status: string | null;
   premiered: string | null;
   image: { medium: string; original: string } | null;
   externals: { imdb: string | null; thetvdb: number | null };
@@ -21,6 +23,7 @@ export interface TvmazeEpisode {
   number: number;
   airdate: string | null;
   airstamp: string | null;
+  runtime: number | null;
 }
 
 export async function searchShows(query: string): Promise<TvmazeShow[]> {

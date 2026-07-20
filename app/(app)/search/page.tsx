@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface SeasonBreakdown {
@@ -28,15 +28,39 @@ export default function SearchPage() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const router = useRouter();
 
-  async function handleSearch(e: React.FormEvent) {
-    e.preventDefault();
-    if (query.trim().length < 2) return;
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestIdRef = useRef(0);
+
+  async function runSearch(q: string) {
+    if (q.trim().length < 2) {
+      setResults([]);
+      setLoading(false);
+      return;
+    }
+    const requestId = ++requestIdRef.current;
     setLoading(true);
-    setResults([]);
-    const res = await fetch(`/api/tvmaze/search?q=${encodeURIComponent(query)}`);
+    const res = await fetch(`/api/tvmaze/search?q=${encodeURIComponent(q)}`);
     const data = await res.json();
+    if (requestId !== requestIdRef.current) return; // une saisie plus récente a pris le dessus
     setResults(data.results ?? []);
     setLoading(false);
+  }
+
+  function handleQueryChange(value: string) {
+    setQuery(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (value.trim().length < 2) {
+      setResults([]);
+      setLoading(false);
+      return;
+    }
+    debounceRef.current = setTimeout(() => runSearch(value), 300);
+  }
+
+  function handleSearch(e: React.FormEvent) {
+    e.preventDefault();
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    runSearch(query);
   }
 
   async function handleAdd(show: SearchResult, category: 'anime' | 'serie') {
@@ -60,7 +84,8 @@ export default function SearchPage() {
       <form onSubmit={handleSearch} className="flex gap-2 mb-8">
         <input
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => handleQueryChange(e.target.value)}
+          autoFocus
           placeholder="Titre d'une série ou d'un anime…"
           className="flex-1 bg-tape border border-ribbon rounded-tape px-4 py-2.5 placeholder:text-muted/60 focus:border-rec outline-none"
         />

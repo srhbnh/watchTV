@@ -15,12 +15,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <div className="min-h-screen flex flex-col md:flex-row">
       <nav className="border-b md:border-b-0 md:border-r border-ribbon md:w-56 md:min-h-screen flex md:flex-col justify-between px-4 md:px-6 py-4 md:py-8">
         <div>
-          <Link href="/library" className="font-display text-xl block mb-8">
+          <Link href="/dashboard" className="font-display text-xl block mb-8">
             WatchNext
           </Link>
           <div className="flex md:flex-col gap-1 text-sm">
+            <NavLink href="/dashboard">À voir</NavLink>
             <NavLink href="/library">Bibliothèque</NavLink>
-            <NavLink href="/upcoming">À suivre</NavLink>
             <NavLink href="/search">Ajouter</NavLink>
             <NavLink href="/profile">Profil</NavLink>
           </div>

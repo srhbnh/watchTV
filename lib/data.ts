@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import type { LibraryItem, WatchStatus } from '@/lib/types';
 
-export interface NextUpItem {
+export interface ToWatchItem {
   mediaItemId: string;
   title: string;
   category: string | null;
@@ -9,20 +9,51 @@ export interface NextUpItem {
   seasonNumber: number;
   episodeNumber: number;
   episodeTitle: string | null;
-  airDate: string | null;
   episodeId: string;
+  airDate: string | null;
   remainingCount: number;
+  runtimeMinutes: number | null;
 }
 
-export async function getNextUp(userId: string): Promise<NextUpItem[]> {
+export interface UpcomingEpisodeItem {
+  mediaItemId: string;
+  title: string;
+  category: string | null;
+  posterUrl: string | null;
+  seasonNumber: number;
+  episodeNumber: number;
+  episodeTitle: string | null;
+  airDate: string;
+}
+
+export interface DashboardData {
+  toWatch: ToWatchItem[];
+  upcoming: UpcomingEpisodeItem[];
+}
+
+/**
+ * Construit le dashboard "à voir" à partir de la base locale (déjà synchronisée
+ * avec TVmaze en amont, voir lib/sync.ts). Deux blocs :
+ *  - toWatch : le prochain épisode sorti et pas encore vu, pour chaque série
+ *    suivie (watching ou watched — une série "watched" peut très bien avoir
+ *    un épisode tout frais qu'on n'a pas encore vu). Triés par date de
+ *    sortie décroissante : ce qui vient de sortir remonte en haut.
+ *  - upcoming : épisodes annoncés mais pas encore sortis, avec leur date.
+ *
+ * Les séries dont tv_status === 'Ended' sont incluses normalement : "Ended"
+ * veut juste dire qu'aucun nouvel épisode n'est prévu, ça n'empêche pas
+ * d'avoir un backlog à rattraper (ex : reprendre une série finie à la
+ * saison 5 épisode 20).
+ */
+export async function getDashboard(userId: string): Promise<DashboardData> {
   const supabase = createClient();
 
   const { data: statusRows } = await supabase
     .from('user_media_status')
     .select(
       `media_items (
-         id, title, category, poster_url, type,
-         seasons ( season_number, episodes ( id, episode_number, air_date, title ) )
+         id, title, category, poster_url, type, tv_status,
+         seasons ( season_number, episodes ( id, episode_number, air_date, title, runtime_minutes ) )
        )`
     )
     .eq('user_id', userId)
@@ -32,7 +63,7 @@ export async function getNextUp(userId: string): Promise<NextUpItem[]> {
     .map((r: any) => r.media_items)
     .filter((m: any) => m && m.type === 'tv' && m.seasons?.length > 0);
 
-  if (shows.length === 0) return [];
+  if (shows.length === 0) return { toWatch: [], upcoming: [] };
 
   const { data: progressRows } = await supabase
     .from('user_episode_progress')
@@ -40,8 +71,9 @@ export async function getNextUp(userId: string): Promise<NextUpItem[]> {
     .eq('user_id', userId);
   const watchedIds = new Set((progressRows ?? []).map((r) => r.episode_id));
 
-  const today = new Date().toISOString().slice(0, 10);
-  const result: NextUpItem[] = [];
+  const now = new Date().toISOString();
+  const toWatch: ToWatchItem[] = [];
+  const upcoming: UpcomingEpisodeItem[] = [];
 
   for (const show of shows) {
     const allEpisodes = (show.seasons as any[])
@@ -50,31 +82,45 @@ export async function getNextUp(userId: string): Promise<NextUpItem[]> {
       )
       .sort((a, b) => a.season_number - b.season_number || a.episode_number - b.episode_number);
 
-    const aired = allEpisodes.filter((e) => !e.air_date || e.air_date <= today);
-    const nextEpisode = aired.find((e) => !watchedIds.has(e.id));
-    if (!nextEpisode) continue;
+    const aired = allEpisodes.filter((e) => e.air_date && `${e.air_date}T23:59:59` <= now);
+    const unwatchedAired = aired.filter((e) => !watchedIds.has(e.id));
 
-    const remainingCount = aired.filter((e) => !watchedIds.has(e.id)).length;
+    if (unwatchedAired.length > 0) {
+      const next = unwatchedAired[0];
+      toWatch.push({
+        mediaItemId: show.id,
+        title: show.title,
+        category: show.category,
+        posterUrl: show.poster_url,
+        seasonNumber: next.season_number,
+        episodeNumber: next.episode_number,
+        episodeTitle: next.title,
+        episodeId: next.id,
+        airDate: next.air_date,
+        remainingCount: unwatchedAired.length,
+        runtimeMinutes: next.runtime_minutes,
+      });
+    }
 
-    result.push({
-      mediaItemId: show.id,
-      title: show.title,
-      category: show.category,
-      posterUrl: show.poster_url,
-      seasonNumber: nextEpisode.season_number,
-      episodeNumber: nextEpisode.episode_number,
-      episodeTitle: nextEpisode.title,
-      airDate: nextEpisode.air_date,
-      episodeId: nextEpisode.id,
-      remainingCount,
-    });
+    const notYetAired = allEpisodes.filter((e) => e.air_date && `${e.air_date}T23:59:59` > now);
+    for (const e of notYetAired.slice(0, 1)) {
+      upcoming.push({
+        mediaItemId: show.id,
+        title: show.title,
+        category: show.category,
+        posterUrl: show.poster_url,
+        seasonNumber: e.season_number,
+        episodeNumber: e.episode_number,
+        episodeTitle: e.title,
+        airDate: e.air_date,
+      });
+    }
   }
 
-  // Les épisodes sortis le plus récemment remontent en premier ;
-  // les séries de fond de catalogue (pas de date) restent en bas.
-  result.sort((a, b) => (b.airDate ?? '').localeCompare(a.airDate ?? ''));
+  toWatch.sort((a, b) => (b.airDate ?? '').localeCompare(a.airDate ?? ''));
+  upcoming.sort((a, b) => a.airDate.localeCompare(b.airDate));
 
-  return result;
+  return { toWatch, upcoming };
 }
 
 export async function getLibrary(userId: string): Promise<LibraryItem[]> {
@@ -85,7 +131,8 @@ export async function getLibrary(userId: string): Promise<LibraryItem[]> {
     .select(
       `id, status, added_at,
        media_items (
-         id, title, type, category, genres, runtime_minutes, release_date, poster_url, tvmaze_id,
+         id, title, type, category, genres, runtime_minutes, release_date, poster_url,
+         tvmaze_id, tmdb_id, imdb_id, tv_status, last_synced_at,
          seasons ( id, episodes ( id ) )
        )`
     )
@@ -118,8 +165,8 @@ export async function getLibrary(userId: string): Promise<LibraryItem[]> {
       return {
         id: media.id,
         tvmaze_id: media.tvmaze_id,
-        tmdb_id: null,
-        imdb_id: null,
+        tmdb_id: media.tmdb_id,
+        imdb_id: media.imdb_id,
         title: media.title,
         type: media.type,
         category: media.category,
@@ -127,10 +174,94 @@ export async function getLibrary(userId: string): Promise<LibraryItem[]> {
         runtime_minutes: media.runtime_minutes,
         release_date: media.release_date,
         poster_url: media.poster_url,
+        tv_status: media.tv_status,
+        last_synced_at: media.last_synced_at,
         status: row.status as WatchStatus,
         added_at: row.added_at,
         episodes_watched: watchedCountByMedia.get(media.id) ?? 0,
         episodes_total: media.type === 'tv' ? totalEpisodes : null,
       } satisfies LibraryItem;
     });
+}
+
+export interface ProfileStats {
+  episodesWatched: number;
+  moviesWatched: number;
+  showsWatching: number;
+  showsCompleted: number;
+  showsWatchlist: number;
+  showsDropped: number;
+  minutesWatched: number;
+  topGenres: { genre: string; count: number }[];
+}
+
+/**
+ * Stats du profil : nb épisodes/films vus, temps total (épisodes vus +
+ * films au statut "watched"), répartition des statuts, genres dominants.
+ */
+export async function getProfileStats(userId: string): Promise<ProfileStats> {
+  const supabase = createClient();
+
+  const { data: statusRows } = await supabase
+    .from('user_media_status')
+    .select(
+      `status,
+       media_items ( id, type, genres, runtime_minutes )`
+    )
+    .eq('user_id', userId);
+
+  const rows = statusRows ?? [];
+
+  let showsWatching = 0;
+  let showsCompleted = 0;
+  let showsWatchlist = 0;
+  let showsDropped = 0;
+  let moviesWatched = 0;
+  let minutesFromMovies = 0;
+  const genreCounts = new Map<string, number>();
+
+  for (const row of rows as any[]) {
+    const media = row.media_items;
+    if (!media) continue;
+    for (const g of media.genres ?? []) {
+      genreCounts.set(g, (genreCounts.get(g) ?? 0) + 1);
+    }
+    if (media.type === 'movie') {
+      if (row.status === 'watched') {
+        moviesWatched++;
+        minutesFromMovies += media.runtime_minutes ?? 0;
+      }
+      continue;
+    }
+    if (row.status === 'watching') showsWatching++;
+    else if (row.status === 'watched') showsCompleted++;
+    else if (row.status === 'watchlist') showsWatchlist++;
+    else if (row.status === 'dropped') showsDropped++;
+  }
+
+  const { data: progressRows } = await supabase
+    .from('user_episode_progress')
+    .select('episodes ( runtime_minutes )')
+    .eq('user_id', userId);
+
+  const episodesWatched = progressRows?.length ?? 0;
+  const minutesFromEpisodes = (progressRows ?? []).reduce((sum: number, r: any) => {
+    return sum + (r.episodes?.runtime_minutes ?? 0);
+  }, 0);
+
+  const topGenres = Array.from(genreCounts.entries())
+    .map(([genre, count]) => ({ genre, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  return {
+    episodesWatched,
+    moviesWatched,
+    showsWatching,
+    showsCompleted,
+    showsWatchlist,
+    showsDropped,
+    minutesWatched: minutesFromMovies + minutesFromEpisodes,
+    topGenres,
+  };
 }
