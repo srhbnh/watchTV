@@ -1,17 +1,31 @@
+import type { Metadata } from 'next';
+import { Space_Grotesk, Inter, IBM_Plex_Mono } from 'next/font/google';
+import './globals.css';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import SignOutButton from './sign-out-button';
 
+const display = Space_Grotesk({ subsets: ['latin'], variable: '--font-display' });
+const body = Inter({ subsets: ['latin'], variable: '--font-body' });
+const mono = IBM_Plex_Mono({ subsets: ['latin'], weight: ['400', '500'], variable: '--font-mono' });
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
+export const metadata: Metadata = {
+  title: 'WatchNext',
+  description: 'Ton suivi de séries, anime et films — chez toi, pour de bon.',
+};
   if (!user) redirect('/login');
 
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
+    <html lang="fr" className={`${display.variable} ${body.variable} ${mono.variable}`}>
+      <body className="font-body bg-ink text-paper min-h-screen">{children}</body>
+    </html>
     <div className="min-h-screen flex flex-col md:flex-row">
       <nav className="border-b md:border-b-0 md:border-r border-ribbon md:w-56 md:min-h-screen flex md:flex-col justify-between px-4 md:px-6 py-4 md:py-8">
         <div>
